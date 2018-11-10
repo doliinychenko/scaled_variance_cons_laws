@@ -1,4 +1,4 @@
-# scaled_variance_cons_laws
+# Scaled variances in a gas with conservation laws 
 
 This is a code to compute a scaled variance of number of particles in an
 ensemble with conservation laws. A particular application is meant for
@@ -12,15 +12,16 @@ heavy ion collisions. The setting is the following:
 - The task is to compute fluctuations of a specific subset of particle species
   in this ensemble.
 
-The problem is very hard in general, but solved in the limit of large volume
-in arxiv.org/pdf/0706.3290.pdf by Hauer, Gorenstein and Moroz. This code
-implements the formulas from the paper in case of Maxwell-Boltzmann gas.
+The problem is very hard in general, but solved in the limit of large volume in
+[a paper](https://arxiv.org/pdf/0706.3290.pdf) by Hauer, Gorenstein and Moroz.
+This code implements the formulas from the paper in case of Maxwell-Boltzmann
+gas.
 
 ## Prequisites
 
 1. Eigen3 library (eigen.tuxfamily.org)
 2. GNU Scientific Library (GSL) >= 1.15
-3. SMASH library (smash-transport.github.io), which requires first two anyway.
+3. SMASH library (smash-transport.github.io), which requires the first two anyway.
 
 ## Compiling
 
@@ -38,6 +39,6 @@ implements the formulas from the paper in case of Maxwell-Boltzmann gas.
       cmake ..
       make
 
-  If Pythia is not found try
+- If Pythia is not found, try
 
-     cmake .. -DPythia_CONFIG_EXECUTABLE=[...]/pythia8235/bin/pythia8-config
+      cmake .. -DPythia_CONFIG_EXECUTABLE=[...]/pythia8235/bin/pythia8-config
