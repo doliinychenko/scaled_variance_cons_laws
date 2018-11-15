@@ -13,7 +13,7 @@ heavy ion collisions. The setting is the following:
   in this ensemble.
 
 The problem is very hard in general, but solved in the limit of large volume in
-[a paper](https://arxiv.org/pdf/0706.3290.pdf) by Hauer, Gorenstein and Moroz.
+[a paper](https://arxiv.org/pdf/0706.3290.pdf) by Hauer, Begun, and Gorenstein.
 This code implements the formulas from the paper in case of Maxwell-Boltzmann
 gas.
 
