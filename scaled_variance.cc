@@ -66,8 +66,8 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
       const double x = std::exp(mu_m_over_T * k);
       double NN_summand = z * z / k * k2 * x;
       double EN_summand = z * z / (k * k) * (3 * k2 + k * z * k1) * x;
-      double EE_summand = z * z * z / (k * k) *
-                          ((z * z * k * k + 12.0) * k2 + 3.0 * k1) * x;
+      double EE_summand = z * z / (k * k * k) *
+                          ((z * z * k * k + 12.0) * k2 + 3.0 * z * k * k1) * x;
       // std::cout << "k = " << k
       //           << ", NN_summand*factor*1000 = " << NN_summand*factor*1000
       //           << ", EN_summand = " << EN_summand
