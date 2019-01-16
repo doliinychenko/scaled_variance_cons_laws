@@ -1,11 +1,13 @@
-# Scaled variances in a gas with conservation laws 
+# Scaled variances in a gas with conservation laws
 
 This is a code to compute a scaled variance of number of particles in an
 ensemble with conservation laws. A particular application is meant for
 heavy ion collisions. The setting is the following:
 
-- In a box of volume V there is a classical Boltzmann gas at temperature T,
-  baryonchemical potential muB and strangeness chemical potential muS.
+- In a box of volume V there is a gas (optionally classical Boltzmann, or
+  or quantum Bose/Fermi) at temperature T,
+  baryon chemical potential muB, strangeness chemical potential muS, and
+  charge chemical potential muQ.
 - The gas consists of many particle species
 - Custom conservation laws can be imposed on the ensemble:
   energy / baryon number / strangeness / electric charge conservation
@@ -15,7 +17,7 @@ heavy ion collisions. The setting is the following:
 The problem is very hard in general, but solved in the limit of large volume in
 [a paper](https://arxiv.org/pdf/0706.3290.pdf) by Hauer, Begun, and Gorenstein.
 This code implements the formulas from the paper in case of Maxwell-Boltzmann
-gas.
+gas and in case of quantum gas too.
 
 ## Prequisites
 

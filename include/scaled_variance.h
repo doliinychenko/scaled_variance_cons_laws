@@ -7,7 +7,7 @@
 bool load_particle_types();
 
 std::pair<double, double> scaled_variance(
-    double T, double mub, double mus,
+    double T, double mub, double mus, double muq, bool quantum_statistics,
     std::function<bool(const smash::ParticleType &)> type_in_the_box,
     std::function<bool(const smash::ParticleType &)> type_of_interest,
     bool energy_conservation, bool B_conservation, bool S_conservation,

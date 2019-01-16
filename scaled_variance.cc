@@ -60,7 +60,7 @@ bool load_particle_types() {
  * \param[out] mean density and scaled variance of type_of_interest species
  */
 std::pair<double, double> scaled_variance(
-    double T, double mub, double mus,
+    double T, double mub, double mus, double muq, bool quantum_statistics,
     std::function<bool(const smash::ParticleType &)> type_in_the_box,
     std::function<bool(const smash::ParticleType &)> type_of_interest,
     bool energy_conservation, bool B_conservation, bool S_conservation,
@@ -69,38 +69,77 @@ std::pair<double, double> scaled_variance(
   constexpr unsigned int m = 5;
   Eigen::MatrixXd k2_tilde = Eigen::MatrixXd::Zero(m, m);
 
-  double rho_type_interest = 0.0;
   for (const smash::ParticleType &ptype : smash::ParticleType::list_all()) {
     if (!type_in_the_box(ptype)) {
       continue;
     }
-    const double rho_type =
-        smash::HadronGasEos::partial_density(ptype, T, mub, mus);
     const double b = B_conservation ? ptype.baryon_number() : 0;
     const double s = S_conservation ? ptype.strangeness() : 0;
     const double q = Q_conservation ? ptype.charge() : 0;
     const double z = ptype.mass() / T;
-    const double h =
-        z * gsl_sf_bessel_Kn_scaled(3, z) / gsl_sf_bessel_Kn_scaled(2, z);
-    const double a2 = energy_conservation ? T * (h - 1.0) : 0.0;
-    const double a3 = energy_conservation ? T * T * (3.0 * h + z * z) : 0.0;
+    const double mu = mub * b + mus * s + muq *q;
+    const double mu_m_over_T = (mu - ptype.mass()) / T;
+    if (mu_m_over_T > 0 and quantum_statistics) {
+      std::cout << "Warning: quantum expressions for " << ptype.name() <<
+                   " do not converge, m < chemical potential." << std::endl;
+    }
+    const double factor = ptype.pdgcode().spin_degeneracy() * 4.0 * M_PI *
+                          std::pow(T / (2.0 * M_PI * smash::hbarc), 3);
+    double EE = 0.0, EN = 0.0, NN = 0.0;
+    constexpr unsigned int maximum_terms = 50;
+    // std::cout << "Computing matrix for " << ptype.name() << std::endl;
+    for (unsigned int k = 1; k < maximum_terms; k++) {
+      if (k > 1 and !quantum_statistics) {
+        break;
+      }
+      const double k1 = gsl_sf_bessel_Kn_scaled(1, z * k);
+      const double k2 = gsl_sf_bessel_Kn_scaled(2, z * k);
+      const double x = std::exp(mu_m_over_T * k);
+      double NN_summand = z * z / k * k2 * x;
+      double EN_summand = z * z / (k * k) * (3 * k2 + k * z * k1) * x;
+      double EE_summand = z * z * z / (k * k) *
+                          ((z * z * k * k + 12.0) * k2 + 3.0 * k1) * x;
+      // std::cout << "k = " << k
+      //           << ", NN_summand*factor*1000 = " << NN_summand*factor*1000
+      //           << ", EN_summand = " << EN_summand
+      //           << ", EE_summand = " << EE_summand << std::endl;
+      if (k > 1 and
+          EE_summand < EE * 1e-12 and
+          EN_summand < EN * 1e-12 and
+          NN_summand < NN * 1e-12) {
+        break;
+      }
+      if (k % 2 == 0 and ptype.pdgcode().is_baryon()) {
+        NN_summand = -NN_summand;
+        EN_summand = -EN_summand;
+        EE_summand = -EE_summand;
+      }
+      NN += NN_summand;
+      EN += EN_summand;
+      EE += EE_summand;
+    }
+    EE *= factor;
+    EN *= factor;
+    NN *= factor;
 
     Eigen::MatrixXd k2_tilde_ptype(m, m);
     // clang-format off
-    k2_tilde_ptype << 1,   a2,    q,    b,    s,
-                     a2,   a3, a2*q, a2*b, a2*s,
-                      q, a2*q,  q*q,  q*b,  q*s,
-                      b, a2*b,  b*q,  b*b,  b*s,
-                      s, a2*s,  s*q,  s*b,  s*s;
+    k2_tilde_ptype << NN,     EN,    q*NN,    b*NN,    s*NN,
+                      EN,     EE,    q*EN,    b*EN,    s*EN,
+                      q*NN, q*EN,  q*q*NN,  q*b*NN,  q*s*NN,
+                      b*NN, b*EN,  b*q*NN,  b*b*NN,  b*s*NN,
+                      s*NN, s*EN,  s*q*NN,  s*b*NN,  s*s*NN;
     // clang-format on
-    if (type_of_interest(ptype)) {
-      rho_type_interest += rho_type;
-    } else {
+    if (!type_of_interest(ptype)) {
       k2_tilde_ptype.row(0).setZero();
       k2_tilde_ptype.col(0).setZero();
     }
+    k2_tilde += k2_tilde_ptype;
+  }
 
-    k2_tilde += (k2_tilde_ptype * rho_type);
+  if (!energy_conservation) {
+    k2_tilde.row(1).setZero();
+    k2_tilde.col(1).setZero();
   }
 
   // Remove zero rows and columns before asking for determinant
@@ -124,6 +163,8 @@ std::pair<double, double> scaled_variance(
     i++;
   }
 
+  double rho_type_interest = k2_tilde_nz(0, 0);
+
   // No conservation laws: grand-canonical case, therefore
   // Poisson distribution and scaled variance = 1.
   if (n < 2) {
@@ -132,39 +173,68 @@ std::pair<double, double> scaled_variance(
 
   const double det_k2_tilde = k2_tilde_nz.determinant();
   const double det_k2 = k2_tilde_nz.block(1, 1, n - 1, n - 1).determinant();
-  const double expected_scaled_variance =
-      det_k2_tilde / det_k2 / rho_type_interest;
+  const double expected_scaled_variance = det_k2_tilde / det_k2 /
+                                          rho_type_interest;
   return std::make_pair(rho_type_interest, expected_scaled_variance);
 }
 
 int main() {
   load_particle_types();
-  const double T = 0.129413;
-  const double mub = 0.0;
-  const double mus = 0.0;
+  smash::HadronGasEos eos(false);
   const double V = 1000.0;
-  // Gas of only pions
-  const std::vector<smash::PdgCode> pdgs_of_interest = {
-      smash::pdg::pi_p, smash::pdg::pi_m, smash::pdg::pi_z};
+  const double Energy = 500.0;
+  const double B_tot = 0.0, S_tot = 0.0;
+  constexpr bool quantum_statistics = false;
+
+  // The included hadron sorts are defined by smash::HadronGasEos::is_eos_particle
+  // std::array<double, 3> T_muB_muS = eos.solve_eos(Energy/V, B_tot/V, S_tot/V);
+  const double T = 0.2; // T_muB_muS[0];
+  const double mub = 0.0; // T_muB_muS[1];
+  const double mus = 0.0; // T_muB_muS[2];
+  const double muq = 0.0;
+  std::cout << "Energy [GeV] = " << Energy
+            << ", Volume [fm^3] = " << V
+            << ", B_tot = " << B_tot
+            << ", S_tot = " << S_tot << std::endl;
+  std::cout << "T [GeV] = " << T
+            << ", muB [GeV] = " << mub
+            << ", muS [GeV] = " << mus
+            << ", muQ = " << muq << std::endl;
+  std::cout << "Quantum statistics = " << quantum_statistics << std::endl;
+
+  std::vector<smash::PdgCode> pdgs_of_interest;
+  for (const smash::ParticleType &t : smash::ParticleType::list_all()) {
+    if (smash::HadronGasEos::is_eos_particle(t)) {
+      pdgs_of_interest.push_back(t.pdgcode());
+    }
+  }
+  std::sort(pdgs_of_interest.begin(), pdgs_of_interest.end(),
+            [&](smash::PdgCode a, smash::PdgCode b) {
+              smash::ParticleTypePtr ta = &smash::ParticleType::find(a);
+              smash::ParticleTypePtr tb = &smash::ParticleType::find(b);
+              return ta->mass() < tb->mass();
+            });
   for (const smash::PdgCode &pdg : pdgs_of_interest) {
     const smash::ParticleType &ptype = smash::ParticleType::find(pdg);
     const auto density_and_variance =
-        scaled_variance(T, mub, mus,
-                        [&](const smash::ParticleType &type_is_in_the_box) {
-                          return type_is_in_the_box.pdgcode().is_pion();
-                        },
-                        [&](const smash::ParticleType &type_condition) {
-                          return type_condition == ptype;
-                        },
-                        true, true, true, true);
+        scaled_variance(T, mub, mus, muq, quantum_statistics,
+          [&](const smash::ParticleType &type_is_in_the_box) {
+            return smash::HadronGasEos::is_eos_particle(type_is_in_the_box);
+          },
+          [&](const smash::ParticleType &type_condition) {
+            return type_condition == ptype;
+          },
+          true, true, true, true);
     std::cout << ptype.name() << " " << density_and_variance.first * V << " "
               << density_and_variance.second << std::endl;
   }
 
   // Variance of total number
   const auto density_and_variance = scaled_variance(
-      T, mub, mus,
-      [&](const smash::ParticleType &t) { return t.pdgcode().is_pion(); },
+      T, mub, mus, muq, quantum_statistics,
+      [&](const smash::ParticleType &t) {
+        return smash::HadronGasEos::is_eos_particle(t);
+      },
       [&](const smash::ParticleType &) { return true; }, true, true, true,
       true);
   std::cout << "Ntot"
