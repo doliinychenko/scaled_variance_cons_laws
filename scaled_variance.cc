@@ -191,7 +191,7 @@ int main() {
   // Prepare the set of particle species in the box
   std::vector<smash::ParticleTypePtr> hadrons_in_the_box;
   for (const smash::ParticleType &t : smash::ParticleType::list_all()) {
-    if (t.is_hadron() && t.mass() < 0.2 && t.charge() == 0) {
+    if (t.is_hadron() && t.mass() < 1.0) {
       hadrons_in_the_box.push_back(&t);
     }
   }
@@ -200,13 +200,18 @@ int main() {
               return ta->mass() < tb->mass();
             });
 
-  const double V = 1000.0;
+  const double V = 1000.0;  // [fm^3]
+  const double Temperature = 0.2;  // [GeV]
+  const double muB = 0.0;  // [GeV]
+  const double muS = 0.0;  // [GeV]
+  const double muQ = 0.0;  // [GeV]
   const bool E_conservation = true;
   const bool B_conservation = true;
   const bool S_conservation = true;
   const bool Q_conservation = true;
   const bool quantum_statistics = true;
-  ScaledVarianceCalculator svc(hadrons_in_the_box, 20.0, 0.0, 0.0, 0.0,
+  ScaledVarianceCalculator svc(hadrons_in_the_box,
+                               Temperature, muB, muS, muQ,
                                E_conservation, B_conservation,
                                S_conservation, Q_conservation,
                                quantum_statistics);
