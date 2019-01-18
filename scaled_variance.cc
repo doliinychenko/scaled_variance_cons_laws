@@ -41,6 +41,7 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
 
   constexpr unsigned int m = 5;
   Eigen::MatrixXd k2_tilde = Eigen::MatrixXd::Zero(m, m);
+  double kappa1 = 0.0;
 
   for (const smash::ParticleTypePtr ptype : all_types_in_the_box_) {
     const double b = B_conservation_ ? ptype->baryon_number() : 0;
@@ -55,7 +56,7 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
     }
     const double factor = ptype->pdgcode().spin_degeneracy() * 4.0 * M_PI *
                           std::pow(T_ / (2.0 * M_PI * smash::hbarc), 3);
-    double EE = 0.0, EN = 0.0, NN = 0.0;
+    double EE = 0.0, EN = 0.0, NN = 0.0, N1 = 0.0;
     // std::cout << "Computing matrix for " << ptype.name() << std::endl;
     for (unsigned int k = 1; k < quantum_series_max_terms_; k++) {
       if (k > 1 and !quantum_statistics_) {
@@ -64,32 +65,38 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
       const double k1 = gsl_sf_bessel_Kn_scaled(1, z * k);
       const double k2 = gsl_sf_bessel_Kn_scaled(2, z * k);
       const double x = std::exp(mu_m_over_T * k);
-      double NN_summand = z * z / k * k2 * x;
-      double EN_summand = z * z / (k * k) * (3 * k2 + k * z * k1) * x;
-      double EE_summand = z * z / (k * k * k) *
+      double N1_summand = z * z / k * k2 * x;
+      double NN_summand = z * z * k2 * x;
+      double EN_summand = z * z / k * (3 * k2 + k * z * k1) * x;
+      double EE_summand = z * z / (k * k) *
                           ((z * z * k * k + 12.0) * k2 + 3.0 * z * k * k1) * x;
       // std::cout << "k = " << k
-      //           << ", NN_summand*factor*1000 = " << NN_summand*factor*1000
-      //           << ", EN_summand = " << EN_summand
-      //           << ", EE_summand = " << EE_summand << std::endl;
+      //          << ", N1_summand*factor*1000 = " << N1_summand*factor*1000
+      //          << ", NN_summand*factor*1000 = " << NN_summand*factor*1000
+      //          << ", EN_summand = " << EN_summand
+      //          << ", EE_summand = " << EE_summand << std::endl;
       if (k > 1 and
           EE_summand < EE * quantum_series_rel_precision_ and
           EN_summand < EN * quantum_series_rel_precision_ and
-          NN_summand < NN * quantum_series_rel_precision_) {
+          NN_summand < NN * quantum_series_rel_precision_ and
+          N1_summand < N1 * quantum_series_rel_precision_) {
         break;
       }
       if (k % 2 == 0 and ptype->pdgcode().is_baryon()) {
         NN_summand = -NN_summand;
         EN_summand = -EN_summand;
         EE_summand = -EE_summand;
+        N1_summand = -N1_summand;
       }
       NN += NN_summand;
       EN += EN_summand;
       EE += EE_summand;
+      N1 += N1_summand;
     }
     EE *= factor;
     EN *= factor;
     NN *= factor;
+    N1 *= factor;
 
     Eigen::MatrixXd k2_tilde_ptype(m, m);
     // clang-format off
@@ -102,7 +109,9 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
     if (!type_of_interest(ptype)) {
       k2_tilde_ptype.row(0).setZero();
       k2_tilde_ptype.col(0).setZero();
+      N1 = 0.0;
     }
+    kappa1 += N1;
     k2_tilde += k2_tilde_ptype;
   }
 
@@ -110,7 +119,6 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
     k2_tilde.row(1).setZero();
     k2_tilde.col(1).setZero();
   }
-
   // Remove zero rows and columns before asking for determinant
   // This uses the property of k2_tilde matrix being symmetric
   Eigen::Matrix<bool, 1, Eigen::Dynamic> non_zeros =
@@ -132,12 +140,11 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
     i++;
   }
 
-  double rho_type_interest = k2_tilde_nz(0, 0);
-
-  // No conservation laws: grand-canonical case, therefore
-  // Poisson distribution and scaled variance = 1.
+  const double rho_type_interest = kappa1;
+  // No conservation laws: grand-canonical case
   if (n < 2) {
-    return std::make_pair(rho_type_interest, 1.0);
+    return std::make_pair(rho_type_interest,
+                          k2_tilde_nz(0,0) / kappa1);
   }
 
   const double det_k2_tilde = k2_tilde_nz.determinant();
@@ -184,7 +191,7 @@ int main() {
   // Prepare the set of particle species in the box
   std::vector<smash::ParticleTypePtr> hadrons_in_the_box;
   for (const smash::ParticleType &t : smash::ParticleType::list_all()) {
-    if (t.is_hadron() && t.mass() < 1.0) {
+    if (t.is_hadron() && t.mass() < 0.2 && t.charge() == 0) {
       hadrons_in_the_box.push_back(&t);
     }
   }
@@ -194,9 +201,15 @@ int main() {
             });
 
   const double V = 1000.0;
-  ScaledVarianceCalculator svc(hadrons_in_the_box, 0.2, 0.0, 0.0, 0.0,
-                               true, true, true, true, true);
-  // svc.set_quantum_statistics(false);
+  const bool E_conservation = true;
+  const bool B_conservation = true;
+  const bool S_conservation = true;
+  const bool Q_conservation = true;
+  const bool quantum_statistics = true;
+  ScaledVarianceCalculator svc(hadrons_in_the_box, 20.0, 0.0, 0.0, 0.0,
+                               E_conservation, B_conservation,
+                               S_conservation, Q_conservation,
+                               quantum_statistics);
   std::cout << svc;
 
   // Variance of each specie
