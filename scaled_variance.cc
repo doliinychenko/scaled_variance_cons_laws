@@ -36,6 +36,131 @@ bool load_particle_types() {
   return false;
 }
 
+
+
+int ScaledVarianceCalculator::set_eos_solver_equations(
+                             const gsl_vector* x, void* params,
+                             gsl_vector* f) {
+  smash::ParticleTypePtrList* types =
+      reinterpret_cast<struct solver_params *>(params)->types;
+  double e = reinterpret_cast<struct solver_params *>(params)->e;
+  double nb = reinterpret_cast<struct solver_params *>(params)->nb;
+  double ns = reinterpret_cast<struct solver_params *>(params)->ns;
+  double nq = reinterpret_cast<struct solver_params *>(params)->nq;
+
+  const double T = gsl_vector_get(x, 0);
+  const double mub = gsl_vector_get(x, 1);
+  const double mus = gsl_vector_get(x, 2);
+  const double muq = gsl_vector_get(x, 3);
+
+  double e_tot = 0.0, nb_tot = 0.0, ns_tot = 0.0, nq_tot = 0.0;
+  for (const smash::ParticleTypePtr t : (*types)) {
+    const double b = t->baryon_number();
+    const double s = t->strangeness();
+    const double q = t->charge();
+    const double z = t->mass() / T;
+    const double mu = mub * b + mus * s + muq * q;
+    const double mu_m_over_T = (mu - t->mass()) / T;
+    const double factor = t->pdgcode().spin_degeneracy() * 4.0 * M_PI *
+                          std::pow(T / (2.0 * M_PI * smash::hbarc), 3);
+    const double k1 = gsl_sf_bessel_Kn_scaled(1, z);
+    const double k2 = gsl_sf_bessel_Kn_scaled(2, z);
+    const double ex = std::exp(mu_m_over_T);
+    double rho = z * z *  k2 * ex * factor;
+    double edens = z * z * (3 * k2 + z * k1) * ex * T * factor;
+    e_tot += edens;
+    nb_tot += rho * b;
+    ns_tot += rho * s;
+    nq_tot += rho * q;
+  }
+  gsl_vector_set(f, 0, e_tot - e);
+  gsl_vector_set(f, 1, nb_tot - nb);
+  gsl_vector_set(f, 2, ns_tot - ns);
+  gsl_vector_set(f, 3, nq_tot - nq);
+  return GSL_SUCCESS;
+}
+
+std::string ScaledVarianceCalculator::print_solver_state(size_t iter,
+     gsl_multiroot_fsolver* solver) const {
+  std::stringstream s;
+  // clang-format off
+  s << "iter = " << iter << ","
+    << " x = " << gsl_vector_get(solver->x, 0) << " "
+               << gsl_vector_get(solver->x, 1) << " "
+               << gsl_vector_get(solver->x, 2) << " "
+               << gsl_vector_get(solver->x, 3) << ", "
+    << "f(x) = " << gsl_vector_get(solver->f, 0) << " "
+                 << gsl_vector_get(solver->f, 1) << " "
+                 << gsl_vector_get(solver->f, 2) << " "
+                 << gsl_vector_get(solver->f, 3) << " "
+                 << std::endl;
+  // clang-format on
+  return s.str();
+
+}
+
+void ScaledVarianceCalculator::setTmu_from_conserved(double Etot, double V,
+                                                double B, double S, double Q) {
+  if (quantum_statistics_) {
+    std::cout << "WARNING: quantum statistics requested, but not implemented "
+              << "for (E, B, S, Q) -> (T, muB, muS, muQ) solver." << std::endl;
+    throw std::runtime_error("");
+  }
+  const gsl_multiroot_fsolver_type *solver_type = gsl_multiroot_fsolver_hybrid;
+  gsl_multiroot_fsolver* solver = gsl_multiroot_fsolver_alloc(solver_type, 4);
+  gsl_vector* x = gsl_vector_alloc(4);
+  int residual_status = GSL_SUCCESS;
+  size_t iter = 0;
+  std::cout << print_solver_state(iter, solver);
+
+  struct solver_params p = {&all_types_in_the_box_, Etot/V, B/V, S/V, Q/V};
+  gsl_multiroot_function f = {&set_eos_solver_equations, 4, &p};
+
+  gsl_vector_set(x, 0, 0.15);
+  gsl_vector_set(x, 1, 0.01);
+  gsl_vector_set(x, 2, 0.01);
+  gsl_vector_set(x, 3, 0.01);
+
+  gsl_multiroot_fsolver_set(solver, &f, x);
+  do {
+    iter++;
+    const auto iterate_status = gsl_multiroot_fsolver_iterate(solver);
+    // std::cout << print_solver_state(iter, solver);
+
+    // Avoiding too low temperature
+    if (gsl_vector_get(solver->x, 0) < 0.015) {
+      T_ = 0.0;
+      mub_ = 0.0;
+      mus_ = 0.0;
+      muq_ = 0.0;
+      return;
+    }
+
+    // check if solver is stuck
+    if (iterate_status) {
+      break;
+    }
+    residual_status = gsl_multiroot_test_residual(solver->f, 1.e-9);
+  } while (residual_status == GSL_CONTINUE && iter < 1000);
+
+  if (residual_status != GSL_SUCCESS) {
+    std::stringstream solver_parameters;
+    solver_parameters << "Solver run with "
+                      << "e = " << Etot/V << ", nb = " << B/V
+                      << ", ns = " << S/V << ", nq = " << Q/V
+                      << std::endl;
+    throw std::runtime_error(gsl_strerror(residual_status) +
+                             solver_parameters.str() +
+                             print_solver_state(iter, solver));
+  }
+  T_ = gsl_vector_get(solver->x, 0);
+  mub_ = gsl_vector_get(solver->x, 1);
+  mus_ = gsl_vector_get(solver->x, 2);
+  muq_ = gsl_vector_get(solver->x, 3);
+  gsl_multiroot_fsolver_free(solver);
+  gsl_vector_free(x);
+}
+
 std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
     std::function<bool(const smash::ParticleTypePtr)> type_of_interest) {
 
@@ -191,7 +316,7 @@ int main() {
   // Prepare the set of particle species in the box
   std::vector<smash::ParticleTypePtr> hadrons_in_the_box;
   for (const smash::ParticleType &t : smash::ParticleType::list_all()) {
-    if (t.is_hadron() && t.mass() < 1.0) {
+    if (t.is_hadron() && t.mass() < 2.0) {
       hadrons_in_the_box.push_back(&t);
     }
   }
@@ -200,7 +325,6 @@ int main() {
               return ta->mass() < tb->mass();
             });
 
-  const double V = 1000.0;  // [fm^3]
   const double Temperature = 0.2;  // [GeV]
   const double muB = 0.0;  // [GeV]
   const double muS = 0.0;  // [GeV]
@@ -209,12 +333,18 @@ int main() {
   const bool B_conservation = true;
   const bool S_conservation = true;
   const bool Q_conservation = true;
-  const bool quantum_statistics = true;
+  const bool quantum_statistics = false;
   ScaledVarianceCalculator svc(hadrons_in_the_box,
                                Temperature, muB, muS, muQ,
                                E_conservation, B_conservation,
                                S_conservation, Q_conservation,
                                quantum_statistics);
+  const double V = 1762.1897;  // [fm^3]
+  const double E_tot = 972.4227;  // [GeV]
+  const double B_tot = 0.0;
+  const double S_tot = 0.0;
+  const double Q_tot = 0.0;
+  svc.setTmu_from_conserved(E_tot, V, B_tot, S_tot, Q_tot);
   std::cout << svc;
 
   // Variance of each specie

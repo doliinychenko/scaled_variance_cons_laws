@@ -4,6 +4,10 @@
 #include "smash/decaymodes.h"
 #include "smash/particletype.h"
 
+#include <gsl/gsl_multiroots.h>
+#include <gsl/gsl_roots.h>
+#include <gsl/gsl_vector.h>
+
 bool load_particle_types();
 
 class ScaledVarianceCalculator {
@@ -39,6 +43,20 @@ class ScaledVarianceCalculator {
   void set_S_conservation (bool S_cons) { S_conservation_ = S_cons; }
   void set_Q_conservation (bool Q_cons) { Q_conservation_ = Q_cons; }
   void set_quantum_statistics (bool qs) { quantum_statistics_ = qs; }
+
+  struct solver_params {
+    smash::ParticleTypePtrList* types;
+    double e;   // energy density
+    double nb;  // baryon number density
+    double ns;  // strangeness density
+    double nq;  // charge density
+  };
+  static int set_eos_solver_equations(const gsl_vector* x, void* params,
+                                      gsl_vector* f);
+  std::string print_solver_state(size_t iter,
+                                 gsl_multiroot_fsolver* solver) const;
+  void setTmu_from_conserved(double Etot, double V,
+                             double B, double S, double Q);
 
   /**
    * Assumes that there is a gas of particles species defined
