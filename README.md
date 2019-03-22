@@ -5,7 +5,7 @@ ensemble with conservation laws. A particular application is meant for
 heavy ion collisions. The setting is the following:
 
 - In a box of volume V there is a gas (optionally classical Boltzmann, or
-  or quantum Bose/Fermi) at temperature T,
+  quantum Bose/Fermi) at temperature T,
   baryon chemical potential muB, strangeness chemical potential muS, and
   charge chemical potential muQ.
 - The gas consists of many particle species
