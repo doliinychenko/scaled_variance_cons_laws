@@ -78,12 +78,27 @@ class ScaledVarianceCalculator {
   std::pair<double, double> scaled_variance(
     std::function<bool(const smash::ParticleTypePtr)> type_of_interest);
 
+  void prepare_decays();
+
   friend std::ostream& operator<< (std::ostream&,
                                    const ScaledVarianceCalculator&);
 
  private:
   /// List of species included in the gas
   smash::ParticleTypePtrList all_types_in_the_box_;
+  /**
+   *  Structure for holding all decay final state in a form convenient
+   *  for statistical caulculations:
+   *  resonance ->
+   *       vector of decays
+   *       each decay = (branching ratio and vector (product -> count))
+   *  Sum of branching ratios should be 1 for all particles.
+   *  By convention stable particles decay into themselves with brancing ratio 1.
+   */
+  std::map<smash::ParticleTypePtr,
+           std::vector<std::pair<double,
+                               std::map<smash::ParticleTypePtr, int>>>>
+       all_decay_final_states_;
   /// Temperature of the gas [GeV]
   double T_;
   /// Baryo-chemical potential of the gas [GeV]

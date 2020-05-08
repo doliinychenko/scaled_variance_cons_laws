@@ -1,5 +1,7 @@
 #include "scaled_variance.h"
 
+#include "smash/../../scatteractionsfinder.cc"
+
 #include <Eigen/Dense>
 #include <fstream>
 #include <gsl/gsl_sf_bessel.h>
@@ -279,6 +281,54 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
   return std::make_pair(rho_type_interest, expected_scaled_variance);
 }
 
+void ScaledVarianceCalculator::prepare_decays() {
+  std::vector<smash::ParticleTypePtr> all_stable_hadrons;
+  for (const smash::ParticleType &ptype : smash::ParticleType::list_all()) {
+    if (ptype.is_stable()) {
+      all_stable_hadrons.push_back(&ptype);
+    }
+  }
+
+  for (const smash::ParticleTypePtr res : all_types_in_the_box_) {
+    smash::decaytree::Node tree(res->name(), 1.0, {res}, {res}, {res}, {});
+    constexpr double sqrts = 5.0;  // This is sufficient to add all possible decays
+    smash::decaytree::add_decays(tree, sqrts);
+    std::vector<smash::FinalStateCrossSection> fs = tree.final_state_cross_sections();
+    smash::deduplicate(fs);
+    double wsum = 0.0;
+    for (const smash::FinalStateCrossSection &xs : fs) {
+      wsum += xs.cross_section_;
+    }
+    assert(std::abs(wsum - 1.0) < 1.e-9);
+    std::cout << res->name() << std::endl;
+    for (const smash::FinalStateCrossSection &xs : fs) {
+      std::map<smash::ParticleTypePtr, int> decay_final_states;
+      // For each stable particle count how many of it one finds in the final state
+      for (const smash::ParticleTypePtr ptype : all_stable_hadrons) {
+        std::string little_str = ptype->name(),
+                    big_str = xs.name_;
+        // How many times little_str occurs in big_str?
+        int nPos = big_str.find(little_str, 0);
+        int count = 0;
+        while (nPos != std::string::npos) {
+          count++;
+          nPos = big_str.find(little_str, nPos + little_str.size());
+        }
+        if (count > 0) {
+          decay_final_states[ptype] = count;
+        }
+      }
+      all_decay_final_states_[res].emplace_back(
+          std::make_pair(xs.cross_section_, decay_final_states));
+      std::cout << "    " << xs.name_ << " " << xs.cross_section_ << ";   ";
+      for (const auto &hadron_count : decay_final_states) {
+        std::cout << hadron_count.second << hadron_count.first->name() << " ";
+      }
+      std::cout << std::endl;
+    }
+  }
+}
+
 std::ostream& operator<< (std::ostream& out,
                           const ScaledVarianceCalculator &svc) {
   out << "Scaled variance calculator" << std::endl;
@@ -339,6 +389,8 @@ int main() {
                                E_conservation, B_conservation,
                                S_conservation, Q_conservation,
                                quantum_statistics);
+  svc.prepare_decays();
+/*
   const double V = 1762.1897;  // [fm^3]
   const double E_tot = 972.4227;  // [GeV]
   const double B_tot = 0.0;
@@ -360,4 +412,5 @@ int main() {
       [&](const smash::ParticleTypePtr) { return true; });
   std::cout << "Ntot " << density_and_variance.first * V << " "
             << density_and_variance.second << std::endl;
+*/
 }
