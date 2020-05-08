@@ -21,6 +21,6 @@ target_link_libraries(scaled_variance ${GSL_LIBRARY} ${GSL_CBLAS_LIBRARY})
 
 
 if(${SMASH_FOUND})
-  include_directories(${SMASH_INCLUDE_DIR})
+  include_directories(SYSTEM ${SMASH_INCLUDE_DIR})
   target_link_libraries(scaled_variance ${SMASH_LIBRARIES})
 endif(${SMASH_FOUND})
