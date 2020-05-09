@@ -4,6 +4,8 @@
 #include "smash/decaymodes.h"
 #include "smash/particletype.h"
 
+#include <Eigen/Dense>
+
 #include <gsl/gsl_multiroots.h>
 #include <gsl/gsl_roots.h>
 #include <gsl/gsl_vector.h>
@@ -57,7 +59,8 @@ class ScaledVarianceCalculator {
                                  gsl_multiroot_fsolver* solver) const;
   void setTmu_from_conserved(double Etot, double V,
                              double B, double S, double Q);
-
+  static double symmetric_matrix_determinant_excluding_zero_columns_and_rows(const Eigen::MatrixXd &A);
+  void prepare_full_correlation_table_no_resonance_decays();
   /**
    * Assumes that there is a gas of particles species defined
    * by all_types_in_the_box_. This function computes fluctuations
@@ -76,7 +79,7 @@ class ScaledVarianceCalculator {
    * \param[out] mean density and scaled variance of type_of_interest species
    */
   std::pair<double, double> scaled_variance(
-    std::function<bool(const smash::ParticleTypePtr)> type_of_interest);
+    const smash::ParticleTypePtr type_of_interest);
 
   void prepare_decays();
 
@@ -84,6 +87,9 @@ class ScaledVarianceCalculator {
                                    const ScaledVarianceCalculator&);
 
  private:
+  /// Precomputes kappa_NN, kappa_EN, kappa_EE for each species for given T, mu
+  void prepare_thermal_arrays();
+
   /// List of species included in the gas
   smash::ParticleTypePtrList all_types_in_the_box_;
   /**
@@ -99,6 +105,10 @@ class ScaledVarianceCalculator {
            std::vector<std::pair<double,
                                std::map<smash::ParticleTypePtr, int>>>>
        all_decay_final_states_;
+  /// Auxiliary precalculated expressions for every species in the box
+  std::map<smash::ParticleTypePtr, double> kappa_NN_, kappa_EN_, kappa_EE_, thermal_density_;
+  /// Full correlation matrix between the species
+  Eigen::MatrixXd corr_, corr_with_decays_;
   /// Temperature of the gas [GeV]
   double T_;
   /// Baryo-chemical potential of the gas [GeV]
@@ -121,6 +131,8 @@ class ScaledVarianceCalculator {
   const unsigned int quantum_series_max_terms_;
   /// Relative precision, at which quantum series summation stops
   const double quantum_series_rel_precision_;
+  /// Are thermal arrays kappa_NN_, kappa_EN, etc ready?
+  bool thermal_arrays_prepared_ = false;
 };
 
 #endif // SCALED_VARIANCE_H

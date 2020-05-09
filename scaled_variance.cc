@@ -2,7 +2,6 @@
 
 #include "smash/../../scatteractionsfinder.cc"
 
-#include <Eigen/Dense>
 #include <fstream>
 #include <gsl/gsl_sf_bessel.h>
 
@@ -163,19 +162,13 @@ void ScaledVarianceCalculator::setTmu_from_conserved(double Etot, double V,
   gsl_vector_free(x);
 }
 
-std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
-    std::function<bool(const smash::ParticleTypePtr)> type_of_interest) {
-
-  constexpr unsigned int m = 5;
-  Eigen::MatrixXd k2_tilde = Eigen::MatrixXd::Zero(m, m);
-  double kappa1 = 0.0;
-
+void ScaledVarianceCalculator::prepare_thermal_arrays() {
   for (const smash::ParticleTypePtr ptype : all_types_in_the_box_) {
-    const double b = B_conservation_ ? ptype->baryon_number() : 0;
-    const double s = S_conservation_ ? ptype->strangeness() : 0;
-    const double q = Q_conservation_ ? ptype->charge() : 0;
-    const double z = ptype->mass() / T_;
-    const double mu = mub_ * b + mus_ * s + muq_ * q;
+    const double b = ptype->baryon_number(),
+                 s = ptype->strangeness(),
+                 q = ptype->charge(),
+                 z = ptype->mass() / T_,
+                 mu = mub_ * b + mus_ * s + muq_ * q;
     const double mu_m_over_T = (mu - ptype->mass()) / T_;
     if (mu_m_over_T > 0 and quantum_statistics_) {
       std::cout << "Warning: quantum expressions for " << ptype->name() <<
@@ -183,7 +176,10 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
     }
     const double factor = ptype->pdgcode().spin_degeneracy() * 4.0 * M_PI *
                           std::pow(T_ / (2.0 * M_PI * smash::hbarc), 3);
-    double EE = 0.0, EN = 0.0, NN = 0.0, N1 = 0.0;
+    kappa_EE_[ptype] = 0.0;
+    kappa_EN_[ptype] = 0.0;
+    kappa_NN_[ptype] = 0.0;
+    thermal_density_[ptype] = 0.0;
     // std::cout << "Computing matrix for " << ptype.name() << std::endl;
     for (unsigned int k = 1; k < quantum_series_max_terms_; k++) {
       if (k > 1 and !quantum_statistics_) {
@@ -203,10 +199,10 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
       //          << ", EN_summand = " << EN_summand
       //          << ", EE_summand = " << EE_summand << std::endl;
       if (k > 1 and
-          EE_summand < EE * quantum_series_rel_precision_ and
-          EN_summand < EN * quantum_series_rel_precision_ and
-          NN_summand < NN * quantum_series_rel_precision_ and
-          N1_summand < N1 * quantum_series_rel_precision_) {
+          EE_summand < kappa_EE_[ptype] * quantum_series_rel_precision_ and
+          EN_summand < kappa_EN_[ptype] * quantum_series_rel_precision_ and
+          NN_summand < kappa_NN_[ptype] * quantum_series_rel_precision_ and
+          N1_summand < thermal_density_[ptype] * quantum_series_rel_precision_) {
         break;
       }
       if (k % 2 == 0 and ptype->pdgcode().is_baryon()) {
@@ -215,43 +211,29 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
         EE_summand = -EE_summand;
         N1_summand = -N1_summand;
       }
-      NN += NN_summand;
-      EN += EN_summand;
-      EE += EE_summand;
-      N1 += N1_summand;
+      kappa_EE_[ptype] += EE_summand;
+      kappa_EN_[ptype] += EN_summand;
+      kappa_NN_[ptype] += NN_summand;
+      thermal_density_[ptype] += N1_summand;
     }
-    EE *= factor;
-    EN *= factor;
-    NN *= factor;
-    N1 *= factor;
-
-    Eigen::MatrixXd k2_tilde_ptype(m, m);
-    // clang-format off
-    k2_tilde_ptype << NN,     EN,    q*NN,    b*NN,    s*NN,
-                      EN,     EE,    q*EN,    b*EN,    s*EN,
-                      q*NN, q*EN,  q*q*NN,  q*b*NN,  q*s*NN,
-                      b*NN, b*EN,  b*q*NN,  b*b*NN,  b*s*NN,
-                      s*NN, s*EN,  s*q*NN,  s*b*NN,  s*s*NN;
-    // clang-format on
-    if (!type_of_interest(ptype)) {
-      k2_tilde_ptype.row(0).setZero();
-      k2_tilde_ptype.col(0).setZero();
-      N1 = 0.0;
-    }
-    kappa1 += N1;
-    k2_tilde += k2_tilde_ptype;
+    kappa_EE_[ptype] *= factor;
+    kappa_EN_[ptype] *= factor;
+    kappa_NN_[ptype] *= factor;
+    thermal_density_[ptype] *= factor;
   }
+  thermal_arrays_prepared_ = true;
+}
 
-  if (!energy_conservation_) {
-    k2_tilde.row(1).setZero();
-    k2_tilde.col(1).setZero();
-  }
+double ScaledVarianceCalculator::symmetric_matrix_determinant_excluding_zero_columns_and_rows(
+    const Eigen::MatrixXd &A) {
+  assert(A.rows() == A.cols());  // square matrix expected
+  const unsigned int m = A.rows();
   // Remove zero rows and columns before asking for determinant
-  // This uses the property of k2_tilde matrix being symmetric
+  // This uses the property of matrix A being symmetric
   Eigen::Matrix<bool, 1, Eigen::Dynamic> non_zeros =
-      k2_tilde.cast<bool>().colwise().any();
+      A.cast<bool>().colwise().any();
   const unsigned int n = non_zeros.count();
-  Eigen::MatrixXd k2_tilde_nz(n, n);
+  Eigen::MatrixXd A_nz(n, n);
   int i = 0, j;
   for (unsigned int i0 = 0; i0 < m; ++i0) {
     if (!non_zeros(i0)) {
@@ -260,25 +242,107 @@ std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
     j = 0;
     for (unsigned int j0 = 0; j0 < m; ++j0) {
       if (non_zeros(j0)) {
-        k2_tilde_nz(i, j) = k2_tilde(i0, j0);
+        A_nz(i, j) = A(i0, j0);
         j++;
       }
     }
     i++;
   }
+  // std::cout << "Matrix before/after removing zero columns & rows:" << std::endl;
+  // std::cout << A << std::endl;
+  // std::cout << A_nz << std::endl;
+  return A_nz.determinant();
+}
 
-  const double rho_type_interest = kappa1;
-  // No conservation laws: grand-canonical case
-  if (n < 2) {
-    return std::make_pair(rho_type_interest,
-                          k2_tilde_nz(0,0) / kappa1);
+void ScaledVarianceCalculator::prepare_full_correlation_table_no_resonance_decays() {
+  // First consider the grand-canonical case
+  const size_t N_species = all_types_in_the_box_.size();
+  if (!energy_conservation_ &&
+      !B_conservation_ &&
+      !S_conservation_ &&
+      !Q_conservation_) {
+    corr_ = Eigen::MatrixXd::Identity(N_species, N_species);
+    return;
   }
 
-  const double det_k2_tilde = k2_tilde_nz.determinant();
-  const double det_k2 = k2_tilde_nz.block(1, 1, n - 1, n - 1).determinant();
-  const double expected_scaled_variance = det_k2_tilde / det_k2 /
-                                          rho_type_interest;
-  return std::make_pair(rho_type_interest, expected_scaled_variance);
+  corr_ = Eigen::MatrixXd::Zero(N_species, N_species);
+
+  // Compute the k2-matrix, which is a sum over hadrons
+  constexpr unsigned int m = 4;  // Number of conservation laws
+  Eigen::MatrixXd k2 = Eigen::MatrixXd::Zero(m, m);
+  if (!thermal_arrays_prepared_) {
+    prepare_thermal_arrays();
+  }
+
+  for (const smash::ParticleTypePtr ptype : all_types_in_the_box_) {
+    Eigen::MatrixXd k2_summand = Eigen::MatrixXd::Zero(m, m);
+    const double NN = kappa_NN_[ptype],
+                 EN = energy_conservation_ ? kappa_EN_[ptype] : 0,
+                 EE = energy_conservation_ ? kappa_EE_[ptype] : 0,
+                 b = B_conservation_ ? ptype->baryon_number() : 0,
+                 s = S_conservation_ ? ptype->strangeness() : 0,
+                 q = Q_conservation_ ? ptype->charge() : 0;
+    // clang-format off
+    k2_summand <<    EE,    q*EN,    b*EN,    s*EN,
+                   q*EN,  q*q*NN,  q*b*NN,  q*s*NN,
+                   b*EN,  b*q*NN,  b*b*NN,  b*s*NN,
+                   s*EN,  s*q*NN,  s*b*NN,  s*s*NN;
+    // clang-format on
+    k2 += k2_summand;
+  }
+  const double det_k2 =
+    symmetric_matrix_determinant_excluding_zero_columns_and_rows(k2);
+  // Grand-canonical case is already considered above, so det should never be zero
+  if (std::abs(det_k2) < 1.e-16) {
+    std::cout << "Something very suspicious happened, det_k2 = " << det_k2 << std::endl;
+  }
+
+  for (size_t i = 0; i < N_species; i++) {
+    for (size_t j = 0; j <= i; j++) {
+      smash::ParticleTypePtr ti = all_types_in_the_box_[i],
+                             tj = all_types_in_the_box_[j];
+      const double NNi = kappa_NN_[ti],
+                   NNj = kappa_NN_[tj],
+                   ENi = energy_conservation_ ? kappa_EN_[ti] : 0,
+                   ENj = energy_conservation_ ? kappa_EN_[tj] : 0,
+                   bi = B_conservation_ ? ti->baryon_number() : 0,
+                   si = S_conservation_ ? ti->strangeness() : 0,
+                   qi = Q_conservation_ ? ti->charge() : 0,
+                   bj = B_conservation_ ? tj->baryon_number() : 0,
+                   sj = S_conservation_ ? tj->strangeness() : 0,
+                   qj = Q_conservation_ ? tj->charge() : 0,
+                   deltaij = 1 ? (ti == tj) : 0;
+      Eigen::MatrixXd k2tilde = Eigen::MatrixXd::Zero(m + 1, m + 1);
+      // clang-format off
+      k2tilde << deltaij * NNi,     ENi,   qi*NNi,  bi*NNi,  si*NNi,
+                           ENj, k2(0,0),  k2(0,1), k2(0,2), k2(0,3),
+                        qj*NNj, k2(1,0),  k2(1,1), k2(1,2), k2(1,3),
+                        bj*NNj, k2(2,0),  k2(2,1), k2(2,2), k2(2,3),
+                        sj*NNj, k2(3,0),  k2(3,1), k2(3,2), k2(3,3);
+      // clang-format on
+      const double det_k2tilde =
+        symmetric_matrix_determinant_excluding_zero_columns_and_rows(k2tilde);
+      corr_(i,j) = det_k2tilde / det_k2;
+      corr_(j,i) = corr_(i,j);
+    }
+  }
+}
+
+std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
+    const smash::ParticleTypePtr type_of_interest) {
+
+  auto it = std::find(all_types_in_the_box_.begin(),
+                      all_types_in_the_box_.end(), type_of_interest);
+  if (it == all_types_in_the_box_.cend()) {
+    std::cout << "Can't compute scaled variance of "
+              << type_of_interest->name() << ": it is not in the box!"
+              << std::endl;
+    return std::make_pair(0, 0);
+  }
+  size_t i = std::distance(all_types_in_the_box_.begin(), it);
+  const double variance = corr_(i,i),
+               dens = thermal_density_[type_of_interest];
+  return std::make_pair(dens, variance / dens);
 }
 
 void ScaledVarianceCalculator::prepare_decays() {
@@ -389,8 +453,6 @@ int main() {
                                E_conservation, B_conservation,
                                S_conservation, Q_conservation,
                                quantum_statistics);
-  svc.prepare_decays();
-/*
   const double V = 1762.1897;  // [fm^3]
   const double E_tot = 972.4227;  // [GeV]
   const double B_tot = 0.0;
@@ -399,18 +461,13 @@ int main() {
   svc.setTmu_from_conserved(E_tot, V, B_tot, S_tot, Q_tot);
   std::cout << svc;
 
+  svc.prepare_full_correlation_table_no_resonance_decays();
+  //svc.prepare_decays();
+
   // Variance of each specie
   for (const smash::ParticleTypePtr t : hadrons_in_the_box) {
-    const auto density_and_variance = svc.scaled_variance(
-          [&](const smash::ParticleTypePtr t0) { return t0 == t; });
+    const auto density_and_variance = svc.scaled_variance(t);
     std::cout << t->name() << " " << density_and_variance.first * V << " "
               << density_and_variance.second << std::endl;
   }
-
-  // Variance of total number
-  const auto density_and_variance = svc.scaled_variance(
-      [&](const smash::ParticleTypePtr) { return true; });
-  std::cout << "Ntot " << density_and_variance.first * V << " "
-            << density_and_variance.second << std::endl;
-*/
 }
