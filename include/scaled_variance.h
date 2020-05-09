@@ -35,6 +35,9 @@ class ScaledVarianceCalculator {
     all_types_in_the_box_.clear();
     for (const smash::ParticleTypePtr t : types_in_the_box) {
       all_types_in_the_box_.push_back(t);
+      if (t->is_stable()) {
+        stable_particles_.push_back(t);
+      }
     }
   }
   void set_T (double T) { T_ = T; }
@@ -61,6 +64,7 @@ class ScaledVarianceCalculator {
                              double B, double S, double Q);
   static double symmetric_matrix_determinant_excluding_zero_columns_and_rows(const Eigen::MatrixXd &A);
   void prepare_full_correlation_table_no_resonance_decays();
+  void prepare_correlations_after_decays();
   /**
    * Assumes that there is a gas of particles species defined
    * by all_types_in_the_box_. This function computes fluctuations
@@ -108,7 +112,11 @@ class ScaledVarianceCalculator {
   /// Auxiliary precalculated expressions for every species in the box
   std::map<smash::ParticleTypePtr, double> kappa_NN_, kappa_EN_, kappa_EE_, thermal_density_;
   /// Full correlation matrix between the species
-  Eigen::MatrixXd corr_, corr_with_decays_;
+  Eigen::MatrixXd corr_;
+  /// List of stable species, for which correlations after decays are computed
+  smash::ParticleTypePtrList stable_particles_;
+  /// Correlation matrix after decays
+  Eigen::MatrixXd corr_after_decays_;
   /// Temperature of the gas [GeV]
   double T_;
   /// Baryo-chemical potential of the gas [GeV]
@@ -133,6 +141,8 @@ class ScaledVarianceCalculator {
   const double quantum_series_rel_precision_;
   /// Are thermal arrays kappa_NN_, kappa_EN, etc ready?
   bool thermal_arrays_prepared_ = false;
+  /// Is the decays data structure ready?
+  bool decays_prepared_ = false;
 };
 
 #endif // SCALED_VARIANCE_H

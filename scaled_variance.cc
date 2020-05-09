@@ -328,6 +328,57 @@ void ScaledVarianceCalculator::prepare_full_correlation_table_no_resonance_decay
   }
 }
 
+void ScaledVarianceCalculator::prepare_correlations_after_decays() {
+  if (!decays_prepared_) {
+    prepare_decays();
+  }
+
+  size_t n = stable_particles_.size(),
+         m = all_types_in_the_box_.size();
+  corr_after_decays_ = Eigen::MatrixXd::Zero(n,n);
+  for (size_t i = 0; i < n; i++) {
+    for (size_t j = 0; j <= i; j++) {
+      smash::ParticleTypePtr ti = stable_particles_[i],
+                             tj = stable_particles_[j];
+      // Contribution from (R,R') correlation
+      for (size_t ri = 0; ri < m; ri++) {
+        smash::ParticleTypePtr R = all_types_in_the_box_[ri];
+        double n_iR = 0.0;
+        for (auto &decay : all_decay_final_states_[R]) {
+          n_iR += decay.first * decay.second[ti];
+        }
+        for (size_t rj = 0; rj <= ri; rj++) {
+          smash::ParticleTypePtr Rpr = all_types_in_the_box_[rj];
+          double n_jRpr = 0.0;
+          for (auto &decay : all_decay_final_states_[Rpr]) {
+            n_jRpr += decay.first * decay.second[tj];
+          }
+          corr_after_decays_(i,j) += corr_(ri,rj) * n_iR * n_jRpr;
+        }
+      }
+      // Contribution from single resonance
+      for (size_t ri = 0; ri < m; ri++) {
+        smash::ParticleTypePtr R = all_types_in_the_box_[ri];
+        double n_iR = 0, n_jR = 0, n_ijR = 0;
+        for (auto &decay : all_decay_final_states_[R]) {
+          n_iR += decay.first * decay.second[ti];
+          n_jR += decay.first * decay.second[tj];
+          n_ijR += decay.first * decay.second[ti] * decay.second[tj];
+        }
+        corr_after_decays_(i,j) += thermal_density_[R] * (n_ijR - n_iR * n_jR);
+      }
+      corr_after_decays_(j,i) = corr_after_decays_(i,j);
+    }
+  }
+
+  for (const smash::ParticleTypePtr ptype : stable_particles_) {
+    std::cout << ptype->name() << " ";
+  }
+  std::cout << std::endl;
+
+  std::cout << corr_after_decays_ << std::endl;
+}
+
 std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
     const smash::ParticleTypePtr type_of_interest) {
 
@@ -391,6 +442,7 @@ void ScaledVarianceCalculator::prepare_decays() {
       std::cout << std::endl;
     }
   }
+  decays_prepared_ = true;
 }
 
 std::ostream& operator<< (std::ostream& out,
@@ -462,7 +514,7 @@ int main() {
   std::cout << svc;
 
   svc.prepare_full_correlation_table_no_resonance_decays();
-  //svc.prepare_decays();
+  svc.prepare_correlations_after_decays();
 
   // Variance of each specie
   for (const smash::ParticleTypePtr t : hadrons_in_the_box) {
