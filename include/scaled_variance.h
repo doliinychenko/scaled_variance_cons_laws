@@ -82,8 +82,13 @@ class ScaledVarianceCalculator {
    *            which the mean and the scaled variance are computed
    * \param[out] mean density and scaled variance of type_of_interest species
    */
+
   std::pair<double, double> scaled_variance(
     const smash::ParticleTypePtr type_of_interest);
+
+  double custom_correlation(std::function<int(const smash::ParticleTypePtr)> w1,
+    std::function<int(const smash::ParticleTypePtr)> w2,
+    bool thermal_correlation);
 
   void prepare_decays();
 

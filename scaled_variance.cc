@@ -336,36 +336,38 @@ void ScaledVarianceCalculator::prepare_correlations_after_decays() {
   size_t n = stable_particles_.size(),
          m = all_types_in_the_box_.size();
   corr_after_decays_ = Eigen::MatrixXd::Zero(n,n);
+
+  Eigen::MatrixXd niR_matrix = Eigen::MatrixXd::Zero(m,n);
+  for (size_t j = 0; j < m; j++) {
+    const smash::ParticleTypePtr R = all_types_in_the_box_[j];
+    for (size_t i = 0; i < n; i++) {
+      const smash::ParticleTypePtr ti = stable_particles_[i];
+      for (auto &decay : all_decay_final_states_[R]) {
+        niR_matrix(j,i) += decay.first * decay.second[ti];
+      }
+    }
+  }
+
   for (size_t i = 0; i < n; i++) {
     for (size_t j = 0; j <= i; j++) {
-      smash::ParticleTypePtr ti = stable_particles_[i],
-                             tj = stable_particles_[j];
+
       // Contribution from (R,R') correlation
       for (size_t ri = 0; ri < m; ri++) {
-        smash::ParticleTypePtr R = all_types_in_the_box_[ri];
-        double n_iR = 0.0;
-        for (auto &decay : all_decay_final_states_[R]) {
-          n_iR += decay.first * decay.second[ti];
-        }
-        for (size_t rj = 0; rj <= ri; rj++) {
-          smash::ParticleTypePtr Rpr = all_types_in_the_box_[rj];
-          double n_jRpr = 0.0;
-          for (auto &decay : all_decay_final_states_[Rpr]) {
-            n_jRpr += decay.first * decay.second[tj];
-          }
-          corr_after_decays_(i,j) += corr_(ri,rj) * n_iR * n_jRpr;
+        for (size_t rj = 0; rj < m; rj++) {
+          corr_after_decays_(i,j) += corr_(ri,rj) * niR_matrix(ri,i) * niR_matrix(rj,j);
         }
       }
+
       // Contribution from single resonance
+      const smash::ParticleTypePtr ti = stable_particles_[i],
+                                   tj = stable_particles_[j];
       for (size_t ri = 0; ri < m; ri++) {
         smash::ParticleTypePtr R = all_types_in_the_box_[ri];
-        double n_iR = 0, n_jR = 0, n_ijR = 0;
+        double n_ijR = 0;
         for (auto &decay : all_decay_final_states_[R]) {
-          n_iR += decay.first * decay.second[ti];
-          n_jR += decay.first * decay.second[tj];
           n_ijR += decay.first * decay.second[ti] * decay.second[tj];
         }
-        corr_after_decays_(i,j) += thermal_density_[R] * (n_ijR - n_iR * n_jR);
+        corr_after_decays_(i,j) += thermal_density_[R] * (n_ijR - niR_matrix(ri,i) * niR_matrix(ri,j));
       }
       corr_after_decays_(j,i) = corr_after_decays_(i,j);
     }
@@ -475,6 +477,34 @@ std::ostream& operator<< (std::ostream& out,
   return out;
 }
 
+double ScaledVarianceCalculator::custom_correlation(
+  std::function<int(const smash::ParticleTypePtr)> w1,
+  std::function<int(const smash::ParticleTypePtr)> w2,
+  bool thermal_correlation) {
+  double custom_corr = 0.0;
+
+  if (thermal_correlation) {
+    const size_t n = all_types_in_the_box_.size();
+    for (size_t i = 0; i < n; i++) {
+      for (size_t j = 0; j < n; j++) {
+        const smash::ParticleTypePtr t1 = all_types_in_the_box_[i],
+                                     t2 = all_types_in_the_box_[j];
+        custom_corr += w1(t1) * w2(t2) * corr_(i,j);
+      }
+    }
+  } else {
+    const size_t n = stable_particles_.size();
+    for (size_t i = 0; i < n; i++) {
+      for (size_t j = 0; j < n; j++) {
+        const smash::ParticleTypePtr t1 = stable_particles_[i],
+                                     t2 = stable_particles_[j];
+        custom_corr += w1(t1) * w2(t2) * corr_after_decays_(i,j);
+      }
+    }
+  }
+  return custom_corr;
+}
+
 
 int main() {
   load_particle_types();
@@ -491,7 +521,7 @@ int main() {
               return ta->mass() < tb->mass();
             });
 
-  const double Temperature = 0.2;  // [GeV]
+  const double Temperature = 0.15;  // [GeV]
   const double muB = 0.0;  // [GeV]
   const double muS = 0.0;  // [GeV]
   const double muQ = 0.0;  // [GeV]
@@ -510,16 +540,33 @@ int main() {
   const double B_tot = 0.0;
   const double S_tot = 0.0;
   const double Q_tot = 0.0;
-  svc.setTmu_from_conserved(E_tot, V, B_tot, S_tot, Q_tot);
+  // svc.setTmu_from_conserved(E_tot, V, B_tot, S_tot, Q_tot);
   std::cout << svc;
 
   svc.prepare_full_correlation_table_no_resonance_decays();
   svc.prepare_correlations_after_decays();
 
+  bool thermal_correlation = false;
+  double netK_netp = svc.custom_correlation(
+    [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
+                                                (x->pdgcode() == -0x321) ? -1 : 0; },
+    [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x2212) ? +1 :
+                                                (x->pdgcode() == -0x2212) ? -1 : 0; },
+    thermal_correlation);
+  double netK_netK = svc.custom_correlation(
+    [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
+                                                (x->pdgcode() == -0x321) ? -1 : 0; },
+    [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
+                                                (x->pdgcode() == -0x321) ? -1 : 0; },
+    thermal_correlation);
+
+/*
   // Variance of each specie
   for (const smash::ParticleTypePtr t : hadrons_in_the_box) {
     const auto density_and_variance = svc.scaled_variance(t);
     std::cout << t->name() << " " << density_and_variance.first * V << " "
               << density_and_variance.second << std::endl;
   }
+*/
+  std::cout << "net (p,K)/(K,K) = " << netK_netp / netK_netK << std::endl;
 }
