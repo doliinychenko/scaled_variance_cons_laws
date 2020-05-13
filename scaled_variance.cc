@@ -349,6 +349,15 @@ void ScaledVarianceCalculator::prepare_correlations_after_decays() {
   }
 
   for (size_t i = 0; i < n; i++) {
+    const smash::ParticleTypePtr ti = stable_particles_[i];
+    density_after_decays_[ti] = 0.0;
+    for (size_t ri = 0; ri < m; ri++) {
+      const smash::ParticleTypePtr R = all_types_in_the_box_[ri];
+      density_after_decays_[ti] += niR_matrix(ri,i) * thermal_density_[R];
+    }
+  }
+
+  for (size_t i = 0; i < n; i++) {
     for (size_t j = 0; j <= i; j++) {
 
       // Contribution from (R,R') correlation
@@ -480,8 +489,12 @@ std::ostream& operator<< (std::ostream& out,
 double ScaledVarianceCalculator::custom_correlation(
   std::function<int(const smash::ParticleTypePtr)> w1,
   std::function<int(const smash::ParticleTypePtr)> w2,
-  bool thermal_correlation) {
+  bool thermal_correlation,
+  double acceptance_q) {
   double custom_corr = 0.0;
+
+  const double q2 = acceptance_q * acceptance_q,
+               qp = acceptance_q * (1.0 - acceptance_q);
 
   if (thermal_correlation) {
     const size_t n = all_types_in_the_box_.size();
@@ -489,7 +502,11 @@ double ScaledVarianceCalculator::custom_correlation(
       for (size_t j = 0; j < n; j++) {
         const smash::ParticleTypePtr t1 = all_types_in_the_box_[i],
                                      t2 = all_types_in_the_box_[j];
-        custom_corr += w1(t1) * w2(t2) * corr_(i,j);
+        const double w = w1(t1) * w2(t2);
+        custom_corr += w * corr_(i,j) * q2;
+        if (i == j) {
+          custom_corr += w * qp * thermal_density_[t1];
+        }
       }
     }
   } else {
@@ -498,7 +515,11 @@ double ScaledVarianceCalculator::custom_correlation(
       for (size_t j = 0; j < n; j++) {
         const smash::ParticleTypePtr t1 = stable_particles_[i],
                                      t2 = stable_particles_[j];
-        custom_corr += w1(t1) * w2(t2) * corr_after_decays_(i,j);
+        const double w = w1(t1) * w2(t2);
+        custom_corr += w * corr_after_decays_(i,j) * q2;
+        if (i == j) {
+          custom_corr += w * qp * density_after_decays_[t1];
+        }
       }
     }
   }
@@ -521,10 +542,10 @@ int main() {
               return ta->mass() < tb->mass();
             });
 
-  const double Temperature = 0.15;  // [GeV]
-  const double muB = 0.0;  // [GeV]
-  const double muS = 0.0;  // [GeV]
-  const double muQ = 0.0;  // [GeV]
+  const double Temperature = 0.12;  // [GeV]
+  const double muB = 0.6;  // [GeV]
+  const double muS = 0.1;  // [GeV]
+  const double muQ = 0.01;  // [GeV]
   const bool E_conservation = true;
   const bool B_conservation = true;
   const bool S_conservation = true;
@@ -535,30 +556,31 @@ int main() {
                                E_conservation, B_conservation,
                                S_conservation, Q_conservation,
                                quantum_statistics);
-  const double V = 1762.1897;  // [fm^3]
-  const double E_tot = 972.4227;  // [GeV]
-  const double B_tot = 0.0;
-  const double S_tot = 0.0;
-  const double Q_tot = 0.0;
-  // svc.setTmu_from_conserved(E_tot, V, B_tot, S_tot, Q_tot);
+  //const double V = 1762.1897;  // [fm^3]
+  //const double E_tot = 972.4227;  // [GeV]
+  //const double B_tot = 0.0;
+  //const double S_tot = 0.0;
+  //const double Q_tot = 0.0;
+  //svc.setTmu_from_conserved(E_tot, V, B_tot, S_tot, Q_tot);
   std::cout << svc;
 
   svc.prepare_full_correlation_table_no_resonance_decays();
   svc.prepare_correlations_after_decays();
 
-  bool thermal_correlation = false;
+  bool thermal_correlation = true;
+  const double acceptance_q = 0.1;
   double netK_netp = svc.custom_correlation(
     [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
                                                 (x->pdgcode() == -0x321) ? -1 : 0; },
     [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x2212) ? +1 :
                                                 (x->pdgcode() == -0x2212) ? -1 : 0; },
-    thermal_correlation);
+    thermal_correlation, acceptance_q);
   double netK_netK = svc.custom_correlation(
     [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
                                                 (x->pdgcode() == -0x321) ? -1 : 0; },
     [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
                                                 (x->pdgcode() == -0x321) ? -1 : 0; },
-    thermal_correlation);
+    thermal_correlation, acceptance_q);
 
 /*
   // Variance of each specie

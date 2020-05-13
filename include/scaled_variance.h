@@ -88,7 +88,7 @@ class ScaledVarianceCalculator {
 
   double custom_correlation(std::function<int(const smash::ParticleTypePtr)> w1,
     std::function<int(const smash::ParticleTypePtr)> w2,
-    bool thermal_correlation);
+    bool thermal_correlation, double acceptance);
 
   void prepare_decays();
 
@@ -115,7 +115,7 @@ class ScaledVarianceCalculator {
                                std::map<smash::ParticleTypePtr, int>>>>
        all_decay_final_states_;
   /// Auxiliary precalculated expressions for every species in the box
-  std::map<smash::ParticleTypePtr, double> kappa_NN_, kappa_EN_, kappa_EE_, thermal_density_;
+  std::map<smash::ParticleTypePtr, double> kappa_NN_, kappa_EN_, kappa_EE_, thermal_density_, density_after_decays_;
   /// Full correlation matrix between the species
   Eigen::MatrixXd corr_;
   /// List of stable species, for which correlations after decays are computed
