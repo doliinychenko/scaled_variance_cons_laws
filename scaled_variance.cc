@@ -1,6 +1,7 @@
 #include "scaled_variance.h"
 
 #include "smash/../../scatteractionsfinder.cc"
+#include "smash/hadgas_eos.h"
 
 #include <fstream>
 #include <gsl/gsl_sf_bessel.h>
@@ -535,6 +536,75 @@ double ScaledVarianceCalculator::custom_correlation(
   return custom_corr;
 }
 
+namespace {
+  void print_correlators(std::vector<smash::ParticleTypePtr> &hadrons_in_the_box,
+                    double sqrts, double acceptance) {
+    const double mub = 1.477 / (1.0 + 0.343 * sqrts);
+    const double T = 0.157 - 0.087 * mub * mub - 0.0092 * mub * mub * mub * mub;
+    smash::HadronGasEos hadgas(false, false);
+    const double mus = hadgas.mus_net_strangeness0(T, mub);
+    const double muq = 0;
+
+    const bool E_conservation = false;
+    const bool B_conservation = false;
+    const bool S_conservation = false;
+    const bool Q_conservation = false;
+    const bool quantum_statistics = false;
+    ScaledVarianceCalculator svc(hadrons_in_the_box,
+                                 T, mub, mus, muq,
+                                 E_conservation, B_conservation,
+                                 S_conservation, Q_conservation,
+                                 quantum_statistics);
+    //const double V = 1762.1897;  // [fm^3]
+    //const double E_tot = 972.4227;  // [GeV]
+    //const double B_tot = 0.0;
+    //const double S_tot = 0.0;
+    //const double Q_tot = 0.0;
+    //svc.setTmu_from_conserved(E_tot, V, B_tot, S_tot, Q_tot);
+    //std::cout << svc;
+
+    svc.prepare_full_correlation_table_no_resonance_decays();
+    svc.prepare_correlations_after_decays();
+
+    bool thermal_correlation = false;
+    const double acceptance_q = acceptance;
+
+    double netK_netp = svc.custom_correlation(
+      [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
+                                                  (x->pdgcode() == -0x321) ? -1 : 0; },
+      [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x2212) ? +1 :
+                                                  (x->pdgcode() == -0x2212) ? -1 : 0; },
+      thermal_correlation, acceptance_q);
+    double netK_netK = svc.custom_correlation(
+      [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
+                                                  (x->pdgcode() == -0x321) ? -1 : 0; },
+      [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
+                                                  (x->pdgcode() == -0x321) ? -1 : 0; },
+      thermal_correlation, acceptance_q);
+    double netp_netp = svc.custom_correlation(
+      [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x2212) ? +1 :
+                                                  (x->pdgcode() == -0x2212) ? -1 : 0; },
+      [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x2212) ? +1 :
+                                                  (x->pdgcode() == -0x2212) ? -1 : 0; },
+      thermal_correlation, acceptance_q);
+    double netQ_netp = svc.custom_correlation(
+      [](const smash::ParticleTypePtr x) { return x->charge(); },
+      [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x2212) ? +1 :
+                                                  (x->pdgcode() == -0x2212) ? -1 : 0; },
+      thermal_correlation, acceptance_q);
+    double netQ_netK = svc.custom_correlation(
+      [](const smash::ParticleTypePtr x) { return x->charge(); },
+      [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
+                                                  (x->pdgcode() == -0x321) ? -1 : 0; },
+      thermal_correlation, acceptance_q);
+
+    std::cout << sqrts << " " << T << " " << mub << " " << mus << " "
+              << netK_netp / netK_netK << " "
+              << netQ_netp / netp_netp << " "
+              << netQ_netK / netK_netK << std::endl;
+  }
+}
+
 
 int main() {
   load_particle_types();
@@ -551,45 +621,12 @@ int main() {
               return ta->mass() < tb->mass();
             });
 
-  const double Temperature = 0.12;  // [GeV]
-  const double muB = 0.6;  // [GeV]
-  const double muS = 0.1;  // [GeV]
-  const double muQ = 0.01;  // [GeV]
-  const bool E_conservation = true;
-  const bool B_conservation = true;
-  const bool S_conservation = true;
-  const bool Q_conservation = true;
-  const bool quantum_statistics = false;
-  ScaledVarianceCalculator svc(hadrons_in_the_box,
-                               Temperature, muB, muS, muQ,
-                               E_conservation, B_conservation,
-                               S_conservation, Q_conservation,
-                               quantum_statistics);
-  //const double V = 1762.1897;  // [fm^3]
-  //const double E_tot = 972.4227;  // [GeV]
-  //const double B_tot = 0.0;
-  //const double S_tot = 0.0;
-  //const double Q_tot = 0.0;
-  //svc.setTmu_from_conserved(E_tot, V, B_tot, S_tot, Q_tot);
-  std::cout << svc;
+  const double acceptance = 0.2;
+  std::vector<double> sqrt_list{7.7, 14.5, 19.6, 27, 39, 62.4};
 
-  svc.prepare_full_correlation_table_no_resonance_decays();
-  svc.prepare_correlations_after_decays();
-
-  bool thermal_correlation = true;
-  const double acceptance_q = 0.1;
-  double netK_netp = svc.custom_correlation(
-    [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
-                                                (x->pdgcode() == -0x321) ? -1 : 0; },
-    [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x2212) ? +1 :
-                                                (x->pdgcode() == -0x2212) ? -1 : 0; },
-    thermal_correlation, acceptance_q);
-  double netK_netK = svc.custom_correlation(
-    [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
-                                                (x->pdgcode() == -0x321) ? -1 : 0; },
-    [](const smash::ParticleTypePtr x) { return (x->pdgcode() ==  0x321) ? +1 :
-                                                (x->pdgcode() == -0x321) ? -1 : 0; },
-    thermal_correlation, acceptance_q);
+  for (double sqrts : sqrt_list) {
+    print_correlators(hadrons_in_the_box, sqrts, acceptance);
+  }
 
 /*
   // Variance of each specie
@@ -599,5 +636,4 @@ int main() {
               << density_and_variance.second << std::endl;
   }
 */
-  std::cout << "net (p,K)/(K,K) = " << netK_netp / netK_netK << std::endl;
 }
