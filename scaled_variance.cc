@@ -255,13 +255,21 @@ double ScaledVarianceCalculator::symmetric_matrix_determinant_excluding_zero_col
 }
 
 void ScaledVarianceCalculator::prepare_full_correlation_table_no_resonance_decays() {
+
+  if (!thermal_arrays_prepared_) {
+    prepare_thermal_arrays();
+  }
+
   // First consider the grand-canonical case
   const size_t N_species = all_types_in_the_box_.size();
   if (!energy_conservation_ &&
       !B_conservation_ &&
       !S_conservation_ &&
       !Q_conservation_) {
-    corr_ = Eigen::MatrixXd::Identity(N_species, N_species);
+    corr_ = Eigen::MatrixXd::Zero(N_species, N_species);
+    for (size_t i = 0; i < N_species; i++) {
+      corr_(i,i) = thermal_density_[all_types_in_the_box_[i]];
+    }
     return;
   }
 
@@ -270,9 +278,6 @@ void ScaledVarianceCalculator::prepare_full_correlation_table_no_resonance_decay
   // Compute the k2-matrix, which is a sum over hadrons
   constexpr unsigned int m = 4;  // Number of conservation laws
   Eigen::MatrixXd k2 = Eigen::MatrixXd::Zero(m, m);
-  if (!thermal_arrays_prepared_) {
-    prepare_thermal_arrays();
-  }
 
   for (const smash::ParticleTypePtr ptype : all_types_in_the_box_) {
     Eigen::MatrixXd k2_summand = Eigen::MatrixXd::Zero(m, m);
@@ -333,6 +338,10 @@ void ScaledVarianceCalculator::prepare_correlations_after_decays() {
     prepare_decays();
   }
 
+  if (!thermal_arrays_prepared_) {
+    prepare_thermal_arrays();
+  }
+
   size_t n = stable_particles_.size(),
          m = all_types_in_the_box_.size();
   corr_after_decays_ = Eigen::MatrixXd::Zero(n,n);
@@ -382,12 +391,12 @@ void ScaledVarianceCalculator::prepare_correlations_after_decays() {
     }
   }
 
-  for (const smash::ParticleTypePtr ptype : stable_particles_) {
-    std::cout << ptype->name() << " ";
-  }
-  std::cout << std::endl;
+  //for (const smash::ParticleTypePtr ptype : stable_particles_) {
+  //  std::cout << ptype->name() << " ";
+  //}
+  //std::cout << std::endl;
 
-  std::cout << corr_after_decays_ << std::endl;
+  //std::cout << corr_after_decays_ << std::endl;
 }
 
 std::pair<double, double> ScaledVarianceCalculator::scaled_variance(
@@ -426,7 +435,7 @@ void ScaledVarianceCalculator::prepare_decays() {
       wsum += xs.cross_section_;
     }
     assert(std::abs(wsum - 1.0) < 1.e-9);
-    std::cout << res->name() << std::endl;
+    //std::cout << res->name() << std::endl;
     for (const smash::FinalStateCrossSection &xs : fs) {
       std::map<smash::ParticleTypePtr, int> decay_final_states;
       // For each stable particle count how many of it one finds in the final state
@@ -446,11 +455,11 @@ void ScaledVarianceCalculator::prepare_decays() {
       }
       all_decay_final_states_[res].emplace_back(
           std::make_pair(xs.cross_section_, decay_final_states));
-      std::cout << "    " << xs.name_ << " " << xs.cross_section_ << ";   ";
-      for (const auto &hadron_count : decay_final_states) {
-        std::cout << hadron_count.second << hadron_count.first->name() << " ";
-      }
-      std::cout << std::endl;
+      //std::cout << "    " << xs.name_ << " " << xs.cross_section_ << ";   ";
+      //for (const auto &hadron_count : decay_final_states) {
+      //  std::cout << hadron_count.second << hadron_count.first->name() << " ";
+      //}
+      //std::cout << std::endl;
     }
   }
   decays_prepared_ = true;
