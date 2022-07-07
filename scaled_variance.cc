@@ -542,7 +542,7 @@ namespace {
     const double mub = 1.477 / (1.0 + 0.343 * sqrts);
     const double T = 0.157 - 0.087 * mub * mub - 0.0092 * mub * mub * mub * mub;
     smash::HadronGasEos hadgas(false, false);
-    const double mus = hadgas.mus_net_strangeness0(T, mub);
+    const double mus = hadgas.mus_net_strangeness0(T, mub, 0.0);
     const double muq = 0;
 
     const bool E_conservation = false;
